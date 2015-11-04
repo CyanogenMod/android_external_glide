@@ -1,5 +1,7 @@
 package com.bumptech.glide.request.target;
 
+import com.bumptech.glide.util.Util;
+
 /**
  * A simple {@link com.bumptech.glide.request.target.Target} base class with default (usually noop) implementations
  * of non essential methods that allows the caller to specify an exact width/height. Typicaly use cases look something
@@ -28,17 +30,10 @@ public abstract class SimpleTarget<Z> extends BaseTarget<Z> {
     private final int height;
 
     /**
-     * Constructor for the target that assumes you will have called
-     * {@link com.bumptech.glide.GenericRequestBuilder#override(int, int)} on the request builder this target is given
-     * to.
-     *
-     * <p>
-     *     Requests that load into this target will throw an {@link java.lang.IllegalArgumentException} if
-     *     {@link com.bumptech.glide.GenericRequestBuilder#override(int, int)} was not called on the request builder.
-     * </p>
+     * Constructor for the target that uses {@link Target#SIZE_ORIGINAL} as the target width and height.
      */
     public SimpleTarget() {
-        this(-1, -1);
+        this(SIZE_ORIGINAL, SIZE_ORIGINAL);
     }
 
     /**
@@ -59,9 +54,10 @@ public abstract class SimpleTarget<Z> extends BaseTarget<Z> {
      */
     @Override
     public final void getSize(SizeReadyCallback cb) {
-        if (width <= 0 || height <= 0) {
-            throw new IllegalArgumentException("Width and height must both be > 0, but given width: " + width + " and"
-                    + " height: " + height + ", either provide dimensions in the constructor or call override()");
+        if (!Util.isValidDimensions(width, height)) {
+            throw new IllegalArgumentException("Width and height must both be > 0 or Target#SIZE_ORIGINAL, but given"
+                    + " width: " + width + " and height: " + height + ", either provide dimensions in the constructor"
+                    + " or call override()");
         }
         cb.onSizeReady(width, height);
     }

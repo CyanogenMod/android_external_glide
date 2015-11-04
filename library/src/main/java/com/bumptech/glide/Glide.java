@@ -19,6 +19,7 @@ import android.widget.ImageView;
 import com.bumptech.glide.load.DecodeFormat;
 import com.bumptech.glide.load.engine.Engine;
 import com.bumptech.glide.load.engine.bitmap_recycle.BitmapPool;
+import com.bumptech.glide.load.engine.cache.DiskLruCacheFactory;
 import com.bumptech.glide.load.engine.cache.MemoryCache;
 import com.bumptech.glide.load.engine.prefill.BitmapPreFiller;
 import com.bumptech.glide.load.engine.prefill.PreFillType;
@@ -56,6 +57,8 @@ import com.bumptech.glide.load.resource.transcode.GlideBitmapDrawableTranscoder;
 import com.bumptech.glide.load.resource.transcode.ResourceTranscoder;
 import com.bumptech.glide.load.resource.transcode.TranscoderRegistry;
 import com.bumptech.glide.manager.RequestManagerRetriever;
+import com.bumptech.glide.module.GlideModule;
+import com.bumptech.glide.module.ManifestParser;
 import com.bumptech.glide.provider.DataLoadProvider;
 import com.bumptech.glide.provider.DataLoadProviderRegistry;
 import com.bumptech.glide.request.FutureTarget;
@@ -69,6 +72,7 @@ import com.bumptech.glide.util.Util;
 import java.io.File;
 import java.io.InputStream;
 import java.net.URL;
+import java.util.List;
 
 /**
  * A singleton to present a simple static interface for building requests with {@link BitmapRequestBuilder} and
@@ -76,10 +80,7 @@ import java.net.URL;
  * {@link MemoryCache}.
  */
 public class Glide {
-    /** 250 MB of cache. */
-    static final int DEFAULT_DISK_CACHE_SIZE = 250 * 1024 * 1024;
 
-    private static final String DEFAULT_DISK_CACHE_DIR = "image_manager_disk_cache";
     private static final String TAG = "Glide";
     private static volatile Glide glide;
 
@@ -107,7 +108,7 @@ public class Glide {
      * @param context A context.
      */
     public static File getPhotoCacheDir(Context context) {
-        return getPhotoCacheDir(context, DEFAULT_DISK_CACHE_DIR);
+        return getPhotoCacheDir(context, DiskLruCacheFactory.DEFAULT_DISK_CACHE_DIR);
     }
 
     /**
@@ -144,7 +145,17 @@ public class Glide {
         if (glide == null) {
             synchronized (Glide.class) {
                 if (glide == null) {
-                    glide = new GlideBuilder(context).createGlide();
+                    Context applicationContext = context.getApplicationContext();
+                    List<GlideModule> modules = new ManifestParser(applicationContext).parse();
+
+                    GlideBuilder builder = new GlideBuilder(applicationContext);
+                    for (GlideModule module : modules) {
+                        module.applyOptions(applicationContext, builder);
+                    }
+                    glide = builder.createGlide();
+                    for (GlideModule module : modules) {
+                        module.registerComponents(applicationContext, glide);
+                    }
                 }
             }
         }
@@ -157,7 +168,10 @@ public class Glide {
      * {@link #setup(GlideBuilder)}.
      *
      * @see #setup(GlideBuilder)
+     *
+     * @deprecated Use {@link com.bumptech.glide.module.GlideModule} instead. Scheduled to be removed in Glide 4.0.
      */
+    @Deprecated
     public static boolean isSetup() {
         return glide != null;
     }
@@ -168,9 +182,11 @@ public class Glide {
      *
      * @see #isSetup()
      *
+     * @deprecated Use {@link com.bumptech.glide.module.GlideModule} instead. Scheduled to be removed in Glide 4.0.
      * @param builder The builder.
      * @throws IllegalArgumentException if the Glide singleton has already been created.
      */
+    @Deprecated
     public static void setup(GlideBuilder builder) {
         if (isSetup()) {
             throw new IllegalArgumentException("Glide is already setup, check with isSetup() first");
@@ -346,6 +362,7 @@ public class Glide {
     /**
      * Clears as much memory as possible.
      *
+     * @see android.content.ComponentCallbacks#onLowMemory()
      * @see android.content.ComponentCallbacks2#onLowMemory()
      */
     public void clearMemory() {
@@ -361,6 +378,18 @@ public class Glide {
     public void trimMemory(int level) {
         bitmapPool.trimMemory(level);
         memoryCache.trimMemory(level);
+    }
+
+    /**
+     * Clears disk cache.
+     *
+     * <p>
+     *     This method should always be called on a background thread, since it is a blocking call.
+     * </p>
+     */
+    public void clearDiskCache() {
+        Util.assertBackgroundThread();
+        getEngine().clearDiskCache();
     }
 
     /**
@@ -390,6 +419,7 @@ public class Glide {
         Request request = target.getRequest();
         if (request != null) {
             request.clear();
+            target.setRequest(null);
         }
     }
 
@@ -460,11 +490,14 @@ public class Glide {
      * Removes any {@link ModelLoaderFactory} registered for the given model and resource classes if one exists. If a
      * {@link ModelLoaderFactory} is removed, its {@link ModelLoaderFactory#teardown()}} method will be called.
      *
+     * @deprecated Use {@link #register(Class, Class, com.bumptech.glide.load.model.ModelLoaderFactory)} to replace
+     * a registered loader rather than simply removing it.
      * @param modelClass The model class.
      * @param resourceClass The resource class.
      * @param <T> The type of the model.
      * @param <Y> The type of the resource.
      */
+    @Deprecated
     public <T, Y> void unregister(Class<T> modelClass, Class<Y> resourceClass) {
         ModelLoaderFactory<T, Y> removed = loaderFactory.unregister(modelClass, resourceClass);
         if (removed != null) {

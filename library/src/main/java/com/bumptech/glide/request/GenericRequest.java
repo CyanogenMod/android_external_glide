@@ -46,10 +46,12 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
         WAITING_FOR_SIZE,
         /** Finished loading media successfully. */
         COMPLETE,
-        /** Failed to load media. */
+        /** Failed to load media, may be restarted. */
         FAILED,
         /** Cancelled by the user, may not be restarted. */
         CANCELLED,
+        /** Cleared by the user with a placeholder set, may not be restarted. */
+        CLEARED,
         /** Temporarily paused by the system, may be restarted. */
         PAUSED,
     }
@@ -57,6 +59,8 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
     private final String tag = String.valueOf(hashCode());
 
     private Key signature;
+    private Drawable fallbackDrawable;
+    private int fallbackResourceId;
     private int placeholderResourceId;
     private int errorResourceId;
     private Context context;
@@ -97,6 +101,8 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
             int placeholderResourceId,
             Drawable errorDrawable,
             int errorResourceId,
+            Drawable fallbackDrawable,
+            int fallbackResourceId,
             RequestListener<? super A, R> requestListener,
             RequestCoordinator requestCoordinator,
             Engine engine,
@@ -123,6 +129,8 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
                 placeholderResourceId,
                 errorDrawable,
                 errorResourceId,
+                fallbackDrawable,
+                fallbackResourceId,
                 requestListener,
                 requestCoordinator,
                 engine,
@@ -148,6 +156,7 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
         target = null;
         placeholderDrawable = null;
         errorDrawable = null;
+        fallbackDrawable = null;
         requestListener = null;
         requestCoordinator = null;
         transformation = null;
@@ -169,6 +178,8 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
             int placeholderResourceId,
             Drawable errorDrawable,
             int errorResourceId,
+            Drawable fallbackDrawable,
+            int fallbackResourceId,
             RequestListener<? super A, R> requestListener,
             RequestCoordinator requestCoordinator,
             Engine engine,
@@ -182,6 +193,8 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
         this.loadProvider = loadProvider;
         this.model = model;
         this.signature = signature;
+        this.fallbackDrawable = fallbackDrawable;
+        this.fallbackResourceId = fallbackResourceId;
         this.context = context.getApplicationContext();
         this.priority = priority;
         this.target = target;
@@ -253,7 +266,7 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
         }
 
         status = Status.WAITING_FOR_SIZE;
-        if (overrideWidth > 0 && overrideHeight > 0) {
+        if (Util.isValidDimensions(overrideWidth, overrideHeight)) {
             onSizeReady(overrideWidth, overrideHeight);
         } else {
             target.getSize(this);
@@ -298,6 +311,9 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
     @Override
     public void clear() {
         Util.assertMainThread();
+        if (status == Status.CLEARED) {
+            return;
+        }
         cancel();
         // Resource must be released before canNotifyStatusChanged is called.
         if (resource != null) {
@@ -306,6 +322,8 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
         if (canNotifyStatusChanged()) {
             target.onLoadCleared(getPlaceholderDrawable());
         }
+        // Must be after cancel().
+        status = Status.CLEARED;
     }
 
     @Override
@@ -353,7 +371,7 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
      */
     @Override
     public boolean isCancelled() {
-        return status == Status.CANCELLED;
+        return status == Status.CANCELLED || status == Status.CLEARED;
     }
 
     /**
@@ -364,12 +382,22 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
         return status == Status.FAILED;
     }
 
+    private Drawable getFallbackDrawable() {
+      if (fallbackDrawable == null && fallbackResourceId > 0) {
+        fallbackDrawable = context.getResources().getDrawable(fallbackResourceId);
+      }
+      return fallbackDrawable;
+    }
+
     private void setErrorPlaceholder(Exception e) {
         if (!canNotifyStatusChanged()) {
             return;
         }
 
-        Drawable error = getErrorDrawable();
+        Drawable error = model == null ? getFallbackDrawable() : null;
+        if (error == null) {
+          error = getErrorDrawable();
+        }
         if (error == null) {
             error = getPlaceholderDrawable();
         }
@@ -410,7 +438,7 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
         final DataFetcher<T> dataFetcher = modelLoader.getResourceFetcher(model, width, height);
 
         if (dataFetcher == null) {
-            onException(new Exception("Got null fetcher from model loader"));
+            onException(new Exception("Failed to load model: \'" + model + "\'"));
             return;
         }
         ResourceTranscoder<Z, R> transcoder = loadProvider.getTranscoder();
@@ -436,6 +464,12 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
 
     private boolean isFirstReadyResource() {
         return requestCoordinator == null || !requestCoordinator.isAnyResourceSet();
+    }
+
+    private void notifyLoadSuccess() {
+      if (requestCoordinator != null) {
+        requestCoordinator.onRequestSuccess(this);
+      }
     }
 
     /**
@@ -480,14 +514,18 @@ public final class GenericRequest<A, T, Z, R> implements Request, SizeReadyCallb
      * @param result object returned by {@link Resource#get()}, checked for type and never <code>null</code>
      */
     private void onResourceReady(Resource<?> resource, R result) {
+        // We must call isFirstReadyResource before setting status.
+        boolean isFirstResource = isFirstReadyResource();
+        status = Status.COMPLETE;
+        this.resource = resource;
+
         if (requestListener == null || !requestListener.onResourceReady(result, model, target, loadedFromMemoryCache,
-                isFirstReadyResource())) {
-            GlideAnimation<R> animation = animationFactory.build(loadedFromMemoryCache, isFirstReadyResource());
+                isFirstResource)) {
+            GlideAnimation<R> animation = animationFactory.build(loadedFromMemoryCache, isFirstResource);
             target.onResourceReady(result, animation);
         }
 
-        status = Status.COMPLETE;
-        this.resource = resource;
+        notifyLoadSuccess();
 
         if (Log.isLoggable(TAG, Log.VERBOSE)) {
             logV("Resource ready in " + LogTime.getElapsedMillis(startTime) + " size: "

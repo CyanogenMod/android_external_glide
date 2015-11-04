@@ -1,20 +1,24 @@
 package com.bumptech.glide.load.data;
 
 import android.text.TextUtils;
+import android.util.Log;
 
 import com.bumptech.glide.Priority;
 import com.bumptech.glide.load.model.GlideUrl;
+import com.bumptech.glide.util.ContentLengthInputStream;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.util.Map;
 
 /**
  * A DataFetcher that retrieves an {@link java.io.InputStream} for a Url.
  */
 public class HttpUrlFetcher implements DataFetcher<InputStream> {
+    private static final String TAG = "HttpUrlFetcher";
     private static final int MAXIMUM_REDIRECTS = 5;
     private static final HttpUrlConnectionFactory DEFAULT_CONNECTION_FACTORY = new DefaultHttpUrlConnectionFactory();
 
@@ -37,10 +41,11 @@ public class HttpUrlFetcher implements DataFetcher<InputStream> {
 
     @Override
     public InputStream loadData(Priority priority) throws Exception {
-        return loadDataWithRedirects(glideUrl.toURL(), 0 /*redirects*/, null /*lastUrl*/);
+        return loadDataWithRedirects(glideUrl.toURL(), 0 /*redirects*/, null /*lastUrl*/, glideUrl.getHeaders());
     }
 
-    private InputStream loadDataWithRedirects(URL url, int redirects, URL lastUrl) throws IOException {
+    private InputStream loadDataWithRedirects(URL url, int redirects, URL lastUrl, Map<String, String> headers)
+            throws IOException {
         if (redirects >= MAXIMUM_REDIRECTS) {
             throw new IOException("Too many (> " + MAXIMUM_REDIRECTS + ") redirects!");
         } else {
@@ -55,6 +60,9 @@ public class HttpUrlFetcher implements DataFetcher<InputStream> {
             }
         }
         urlConnection = connectionFactory.build(url);
+        for (Map.Entry<String, String> headerEntry : headers.entrySet()) {
+          urlConnection.addRequestProperty(headerEntry.getKey(), headerEntry.getValue());
+        }
         urlConnection.setConnectTimeout(2500);
         urlConnection.setReadTimeout(2500);
         urlConnection.setUseCaches(false);
@@ -67,21 +75,34 @@ public class HttpUrlFetcher implements DataFetcher<InputStream> {
         }
         final int statusCode = urlConnection.getResponseCode();
         if (statusCode / 100 == 2) {
-            stream = urlConnection.getInputStream();
-            return stream;
+            return getStreamForSuccessfulRequest(urlConnection);
         } else if (statusCode / 100 == 3) {
             String redirectUrlString = urlConnection.getHeaderField("Location");
             if (TextUtils.isEmpty(redirectUrlString)) {
                 throw new IOException("Received empty or null redirect url");
             }
             URL redirectUrl = new URL(url, redirectUrlString);
-            return loadDataWithRedirects(redirectUrl, redirects + 1, url);
+            return loadDataWithRedirects(redirectUrl, redirects + 1, url, headers);
         } else {
             if (statusCode == -1) {
                 throw new IOException("Unable to retrieve response code from HttpUrlConnection.");
             }
             throw new IOException("Request failed " + statusCode + ": " + urlConnection.getResponseMessage());
         }
+    }
+
+    private InputStream getStreamForSuccessfulRequest(HttpURLConnection urlConnection)
+            throws IOException {
+        if (TextUtils.isEmpty(urlConnection.getContentEncoding())) {
+            int contentLength = urlConnection.getContentLength();
+            stream = ContentLengthInputStream.obtain(urlConnection.getInputStream(), contentLength);
+        } else {
+            if (Log.isLoggable(TAG, Log.DEBUG)) {
+                Log.d(TAG, "Got non empty content encoding: " + urlConnection.getContentEncoding());
+            }
+            stream = urlConnection.getInputStream();
+        }
+        return stream;
     }
 
     @Override
@@ -100,7 +121,7 @@ public class HttpUrlFetcher implements DataFetcher<InputStream> {
 
     @Override
     public String getId() {
-        return glideUrl.toString();
+        return glideUrl.getCacheKey();
     }
 
     @Override

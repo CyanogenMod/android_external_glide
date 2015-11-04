@@ -5,7 +5,12 @@ import android.graphics.Bitmap;
 import android.os.Build;
 import android.os.Looper;
 
+import com.bumptech.glide.request.target.Target;
+
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import java.util.Queue;
 
 /**
@@ -26,14 +31,18 @@ public final class Util {
      * Returns the hex string of the given byte array representing a SHA256 hash.
      */
     public static String sha256BytesToHex(byte[] bytes) {
-        return bytesToHex(bytes, SHA_256_CHARS);
+        synchronized (SHA_256_CHARS) {
+            return bytesToHex(bytes, SHA_256_CHARS);
+        }
     }
 
     /**
      * Returns the hex string of the given byte array representing a SHA1 hash.
      */
     public static String sha1BytesToHex(byte[] bytes) {
-        return bytesToHex(bytes, SHA_1_CHARS);
+        synchronized (SHA_1_CHARS) {
+            return bytesToHex(bytes, SHA_1_CHARS);
+        }
     }
 
     // Taken from:
@@ -108,6 +117,17 @@ public final class Util {
     }
 
     /**
+     * Returns true if width and height are both > 0 and/or equal to {@link Target#SIZE_ORIGINAL}.
+     */
+    public static boolean isValidDimensions(int width, int height) {
+        return isValidDimension(width) && isValidDimension(height);
+    }
+
+    private static boolean isValidDimension(int dimen) {
+        return dimen > 0 || dimen == Target.SIZE_ORIGINAL;
+    }
+
+    /**
      * Throws an {@link java.lang.IllegalArgumentException} if called on a thread other than the main thread.
      */
     public static void assertMainThread() {
@@ -140,9 +160,25 @@ public final class Util {
     }
 
     /**
-     * Creates a {@link java.util.Queue} of the given size using Glide's preferred implementation.
+     * Returns a {@link java.util.Queue} of the given size using Glide's preferred implementation.
      */
     public static <T> Queue<T> createQueue(int size) {
         return new ArrayDeque<T>(size);
+    }
+
+    /**
+     * Returns a copy of the given list that is safe to iterate over and perform actions that may
+     * modify the original list.
+     *
+     * <p> See #303 and #375. </p>
+     */
+    public static <T> List<T> getSnapshot(Collection<T> other) {
+        // toArray creates a new ArrayList internally and this way we can guarantee entries will not
+        // be null. See #322.
+        List<T> result = new ArrayList<T>(other.size());
+        for (T item : other) {
+            result.add(item);
+        }
+        return result;
     }
 }

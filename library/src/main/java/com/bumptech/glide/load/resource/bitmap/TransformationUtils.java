@@ -17,7 +17,7 @@ import com.bumptech.glide.load.engine.bitmap_recycle.BitmapPool;
  */
 public final class TransformationUtils {
     private static final String TAG = "TransformationUtils";
-    public static final int PAINT_FLAGS = Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG | Paint.FILTER_BITMAP_FLAG;
+    public static final int PAINT_FLAGS = Paint.DITHER_FLAG | Paint.FILTER_BITMAP_FLAG;
 
     private TransformationUtils() {
         // Utility class.
@@ -59,8 +59,7 @@ public final class TransformationUtils {
         if (recycled != null) {
             result = recycled;
         } else {
-            result = Bitmap.createBitmap(width, height, toCrop.getConfig() == null
-                        ? Bitmap.Config.ARGB_8888 : toCrop.getConfig());
+            result = Bitmap.createBitmap(width, height, getSafeConfig(toCrop));
         }
 
         // We don't add or remove alpha, so keep the alpha setting of the Bitmap we were given.
@@ -107,7 +106,7 @@ public final class TransformationUtils {
             return toFit;
         }
 
-        Bitmap.Config config = toFit.getConfig() != null ? toFit.getConfig() : Bitmap.Config.ARGB_8888;
+        Bitmap.Config config = getSafeConfig(toFit);
         Bitmap toReuse = pool.get(targetWidth, targetHeight, config);
         if (toReuse == null) {
             toReuse = Bitmap.createBitmap(targetWidth, targetHeight, config);
@@ -254,12 +253,11 @@ public final class TransformationUtils {
      * @return The rotated and/or flipped image or toOrient if no rotation or flip was necessary.
      */
     public static Bitmap rotateImageExif(Bitmap toOrient, BitmapPool pool, int exifOrientation) {
-        if (exifOrientation == ExifInterface.ORIENTATION_NORMAL
-                || exifOrientation == ExifInterface.ORIENTATION_UNDEFINED) {
-            return toOrient;
-        }
         final Matrix matrix = new Matrix();
         initializeMatrixForRotation(exifOrientation, matrix);
+        if (matrix.isIdentity()) {
+            return toOrient;
+        }
 
         // From Bitmap.createBitmap.
         final RectF newRect = new RectF(0, 0, toOrient.getWidth(), toOrient.getHeight());
@@ -268,9 +266,10 @@ public final class TransformationUtils {
         final int newWidth = Math.round(newRect.width());
         final int newHeight = Math.round(newRect.height());
 
-        Bitmap result = pool.get(newWidth, newHeight, toOrient.getConfig());
+        Bitmap.Config config = getSafeConfig(toOrient);
+        Bitmap result = pool.get(newWidth, newHeight, config);
         if (result == null) {
-            result = Bitmap.createBitmap(newWidth, newHeight, toOrient.getConfig());
+            result = Bitmap.createBitmap(newWidth, newHeight, config);
         }
 
         matrix.postTranslate(-newRect.left, -newRect.top);
@@ -280,6 +279,10 @@ public final class TransformationUtils {
         canvas.drawBitmap(toOrient, matrix, paint);
 
         return result;
+    }
+
+    private static Bitmap.Config getSafeConfig(Bitmap bitmap) {
+      return bitmap.getConfig() != null ? bitmap.getConfig() : Bitmap.Config.ARGB_8888;
     }
 
     // Visible for testing.

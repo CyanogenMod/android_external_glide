@@ -58,6 +58,22 @@ public class ThumbnailRequestCoordinator implements RequestCoordinator, Request 
         return parentIsAnyResourceSet() || isResourceSet();
     }
 
+    @Override
+    public void onRequestSuccess(Request request) {
+        if (request.equals(thumb)) {
+            return;
+        }
+        if (coordinator != null) {
+            coordinator.onRequestSuccess(this);
+        }
+        // Clearing the thumb is not necessarily safe if the thumb is being displayed in the Target,
+        // as a layer in a cross fade for example. The only way we know the thumb is not being
+        // displayed and is therefore safe to clear is if the thumb request has not yet completed.
+        if (!thumb.isComplete()) {
+          thumb.clear();
+        }
+    }
+
     private boolean parentIsAnyResourceSet() {
         return coordinator != null && coordinator.isAnyResourceSet();
     }

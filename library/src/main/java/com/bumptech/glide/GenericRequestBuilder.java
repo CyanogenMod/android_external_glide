@@ -76,6 +76,9 @@ public class GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeT
     private DiskCacheStrategy diskCacheStrategy = DiskCacheStrategy.RESULT;
     private Transformation<ResourceType> transformation = UnitTransformation.get();
     private boolean isTransformationSet;
+    private boolean isThumbnailBuilt;
+    private Drawable fallbackDrawable;
+    private int fallbackResource;
 
     GenericRequestBuilder(LoadProvider<ModelType, DataType, ResourceType, TranscodeType> loadProvider,
             Class<TranscodeType> transcodeClass, GenericRequestBuilder<ModelType, ?, ?, ?> other) {
@@ -125,6 +128,10 @@ public class GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeT
      */
     public GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeType> thumbnail(
             GenericRequestBuilder<?, ?, ?, TranscodeType> thumbnailRequest) {
+        if (this.equals(thumbnailRequest)) {
+            throw new IllegalArgumentException("You cannot set a request as a thumbnail for itself. Consider using "
+                    + "clone() on the request you are passing to thumbnail()");
+        }
         this.thumbnailRequestBuilder = thumbnailRequest;
 
         return this;
@@ -443,6 +450,49 @@ public class GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeT
     }
 
     /**
+     * Sets an {@link android.graphics.drawable.Drawable} to display if the model provided to
+     * {@link #load(Object)} is {@code null}.
+     *
+     * <p>
+     *   If a fallback is not set, null models will cause the error drawable to be displayed. If
+     *   the error drawable is not set, the placeholder will be displayed.
+     * </p>
+     *
+     * @see #placeholder(Drawable)
+     * @see #placeholder(int)
+     *
+     * @param drawable The drawable to display as a placeholder.
+     * @return This request builder.
+     */
+    public GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeType> fallback(
+            Drawable drawable) {
+        this.fallbackDrawable = drawable;
+
+        return this;
+    }
+
+    /**
+     * Sets a resource to display if the model provided to {@link #load(Object)} is {@code null}.
+     *
+     * <p>
+     *   If a fallback is not set, null models will cause the error drawable to be displayed. If
+     *   the error drawable is not set, the placeholder will be displayed.
+     * </p>
+     *
+     * @see #placeholder(Drawable)
+     * @see #placeholder(int)
+     *
+     * @param resourceId The id of the resource to use as a fallback.
+     * @return This request builder.
+     */
+    public GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeType> fallback(
+            int resourceId) {
+        this.fallbackResource = resourceId;
+
+        return this;
+    }
+
+    /**
      * Sets a resource to display if a load fails.
      *
      * @param resourceId The id of the resource to use as a placeholder.
@@ -510,11 +560,8 @@ public class GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeT
      * @return This request builder.
      */
     public GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeType> override(int width, int height) {
-        if (width <= 0) {
-            throw new IllegalArgumentException("Width must be > 0");
-        }
-        if (height <= 0) {
-            throw new IllegalArgumentException("Height must be > 0");
+        if (!Util.isValidDimensions(width, height)) {
+            throw new IllegalArgumentException("Width and height must be Target#SIZE_ORIGINAL or > 0");
         }
         this.overrideWidth = width;
         this.overrideHeight = height;
@@ -643,8 +690,7 @@ public class GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeT
                     break;
                 //$CASES-OMITTED$
                 default:
-                    // silently ignore
-                    break;
+                    // Do nothing.
             }
         }
 
@@ -654,10 +700,10 @@ public class GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeT
     /**
      * Returns a future that can be used to do a blocking get on a background thread.
      *
-     * @param width The desired width in pixels (note this will be overriden by {@link #override(int, int)} if
-     *              previously called).
-     * @param height The desired height in pixels (note this will be overriden by {@link #override(int, int)}}
-     *               if previously called).
+     * @param width The desired width in pixels, or {@link Target#SIZE_ORIGINAL}. This will be overridden by
+     *             {@link #override * (int, int)} if previously called.
+     * @param height The desired height in pixels, or {@link Target#SIZE_ORIGINAL}. This will be overridden by
+     *              {@link #override * (int, int)}} if previously called).
      *
      * @see Glide#clear(com.bumptech.glide.request.FutureTarget)
      *
@@ -689,11 +735,32 @@ public class GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeT
      *     available quickly.
      * </p>
      *
+     *
      * @see com.bumptech.glide.ListPreloader
+     *
+     * @param width The desired width in pixels, or {@link Target#SIZE_ORIGINAL}. This will be overridden by
+     *             {@link #override * (int, int)} if previously called.
+     * @param height The desired height in pixels, or {@link Target#SIZE_ORIGINAL}. This will be overridden by
+     *              {@link #override * (int, int)}} if previously called).
+     * @return A {@link Target} that can be used to cancel the load via
+     *        {@link Glide#clear(com.bumptech.glide.request.target.Target)}.
      */
     public Target<TranscodeType> preload(int width, int height) {
         final PreloadTarget<TranscodeType> target = PreloadTarget.obtain(width, height);
         return into(target);
+    }
+
+    /**
+     * Preloads the resource into the cache using {@link Target#SIZE_ORIGINAL} as the target width and height.
+     * Equivalent to calling {@link #preload(int, int)} with {@link Target#SIZE_ORIGINAL} as the width and height.
+     *
+     * @see #preload(int, int)
+     *
+     * @return A {@link Target} that can be used to cancel the load via
+     *        {@link Glide#clear(com.bumptech.glide.request.target.Target)}.
+     */
+    public Target<TranscodeType> preload() {
+        return preload(Target.SIZE_ORIGINAL, Target.SIZE_ORIGINAL);
     }
 
     void applyCenterCrop() {
@@ -725,6 +792,10 @@ public class GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeT
 
     private Request buildRequestRecursive(Target<TranscodeType> target, ThumbnailRequestCoordinator parentCoordinator) {
         if (thumbnailRequestBuilder != null) {
+            if (isThumbnailBuilt) {
+                throw new IllegalStateException("You cannot use a request as both the main request and a thumbnail, "
+                        + "consider using clone() on the request(s) passed to thumbnail()");
+            }
             // Recursive case: contains a potentially recursive thumbnail request builder.
             if (thumbnailRequestBuilder.animationFactory.equals(NoAnimation.getFactory())) {
                 thumbnailRequestBuilder.animationFactory = animationFactory;
@@ -734,10 +805,19 @@ public class GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeT
                 thumbnailRequestBuilder.priority = getThumbnailPriority();
             }
 
+            if (Util.isValidDimensions(overrideWidth, overrideHeight)
+                    && !Util.isValidDimensions(thumbnailRequestBuilder.overrideWidth,
+                            thumbnailRequestBuilder.overrideHeight)) {
+              thumbnailRequestBuilder.override(overrideWidth, overrideHeight);
+            }
+
             ThumbnailRequestCoordinator coordinator = new ThumbnailRequestCoordinator(parentCoordinator);
             Request fullRequest = obtainRequest(target, sizeMultiplier, priority, coordinator);
+            // Guard against infinite recursion.
+            isThumbnailBuilt = true;
             // Recursively generate thumbnail requests.
             Request thumbRequest = thumbnailRequestBuilder.buildRequestRecursive(target, coordinator);
+            isThumbnailBuilt = false;
             coordinator.setRequests(fullRequest, thumbRequest);
             return coordinator;
         } else if (thumbSizeMultiplier != null) {
@@ -767,6 +847,8 @@ public class GenericRequestBuilder<ModelType, DataType, ResourceType, TranscodeT
                 placeholderId,
                 errorPlaceholder,
                 errorId,
+                fallbackDrawable,
+                fallbackResource,
                 requestListener,
                 requestCoordinator,
                 glide.getEngine(),

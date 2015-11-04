@@ -48,14 +48,17 @@ git rm -rf .idea || true
 
 # Remove test directories we don't care about.
 git rm -rf library/src/androidTest || true
+rm -rf library/src/androidTest || true
 git rm -rf third_party/gif_decoder/src/androidTest || true
 git rm -rf third_party/gif_encoder/src/androidTest || true
+git rm -rf third_party/gif_decoder/src/test || true
+git rm -rf third_party/gif_encoder/src/test || true
 
 # Special case disklrucache because it's a submodule that we can't keep with
 # repo.
-git submodule deinit third_party/disklrucache
-git rm -rf third_party/disklrucache
-rm -rf third_party/disklrucache
+git submodule deinit third_party/disklrucache || true
+git rm -rf third_party/disklrucache || true
+rm -rf third_party/disklrucache || true
 
 # Clone outside of the normal path to avoid conflicts with the submodule.
 REMOTE_DISK_PATH=third_party/remote_disklrucache

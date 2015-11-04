@@ -25,7 +25,8 @@ import java.util.Map;
  * ones from activities and fragment.
  */
 public class RequestManagerRetriever implements Handler.Callback {
-    static final String TAG = "com.bumptech.glide.manager";
+    private static final String TAG = "RMRetriever";
+    static final String FRAGMENT_TAG = "com.bumptech.glide.manager";
 
     /** The singleton instance of RequestManagerRetriever. */
     private static final RequestManagerRetriever INSTANCE = new RequestManagerRetriever();
@@ -70,7 +71,7 @@ public class RequestManagerRetriever implements Handler.Callback {
                     // However, in this case since the manager attached to the application will not receive lifecycle
                     // events, we must force the manager to start resumed using ApplicationLifecycle.
                     applicationManager = new RequestManager(context.getApplicationContext(),
-                            new ApplicationLifecycle());
+                            new ApplicationLifecycle(), new EmptyRequestManagerTreeNode());
                 }
             }
         }
@@ -111,9 +112,6 @@ public class RequestManagerRetriever implements Handler.Callback {
         if (Util.isOnBackgroundThread()) {
             return get(fragment.getActivity().getApplicationContext());
         } else {
-            if (fragment.isDetached()) {
-                throw new IllegalArgumentException("You cannot start a load on a detached fragment");
-            }
             FragmentManager fm = fragment.getChildFragmentManager();
             return supportFragmentGet(fragment.getActivity(), fm);
         }
@@ -145,54 +143,59 @@ public class RequestManagerRetriever implements Handler.Callback {
         if (Util.isOnBackgroundThread() || Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
             return get(fragment.getActivity().getApplicationContext());
         } else {
-            assertNotDetached(fragment);
             android.app.FragmentManager fm = fragment.getChildFragmentManager();
             return fragmentGet(fragment.getActivity(), fm);
         }
     }
 
-    @TargetApi(Build.VERSION_CODES.HONEYCOMB_MR2)
-    private static void assertNotDetached(android.app.Fragment fragment) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB_MR2 && fragment.isDetached()) {
-            throw new IllegalArgumentException("You cannot start a load on a detached fragment");
-        }
-    }
-
-    @TargetApi(Build.VERSION_CODES.HONEYCOMB)
-    RequestManager fragmentGet(Context context, final android.app.FragmentManager fm) {
-        RequestManagerFragment current = (RequestManagerFragment) fm.findFragmentByTag(TAG);
+    @TargetApi(Build.VERSION_CODES.JELLY_BEAN_MR1)
+    RequestManagerFragment getRequestManagerFragment(final android.app.FragmentManager fm) {
+        RequestManagerFragment current = (RequestManagerFragment) fm.findFragmentByTag(FRAGMENT_TAG);
         if (current == null) {
             current = pendingRequestManagerFragments.get(fm);
             if (current == null) {
                 current = new RequestManagerFragment();
                 pendingRequestManagerFragments.put(fm, current);
-                fm.beginTransaction().add(current, TAG).commitAllowingStateLoss();
+                fm.beginTransaction().add(current, FRAGMENT_TAG).commitAllowingStateLoss();
                 handler.obtainMessage(ID_REMOVE_FRAGMENT_MANAGER, fm).sendToTarget();
             }
         }
+        return current;
+    }
+
+    @TargetApi(Build.VERSION_CODES.HONEYCOMB)
+    RequestManager fragmentGet(Context context, android.app.FragmentManager fm) {
+        RequestManagerFragment current = getRequestManagerFragment(fm);
         RequestManager requestManager = current.getRequestManager();
         if (requestManager == null) {
-            requestManager = new RequestManager(context, current.getLifecycle());
+            requestManager = new RequestManager(context, current.getLifecycle(), current.getRequestManagerTreeNode());
             current.setRequestManager(requestManager);
         }
         return requestManager;
-
     }
 
-    RequestManager supportFragmentGet(Context context, final FragmentManager fm) {
-        SupportRequestManagerFragment current = (SupportRequestManagerFragment) fm.findFragmentByTag(TAG);
+    SupportRequestManagerFragment getSupportRequestManagerFragment(final FragmentManager fm) {
+        SupportRequestManagerFragment current = (SupportRequestManagerFragment) fm.findFragmentByTag(
+
+
+            FRAGMENT_TAG);
         if (current == null) {
             current = pendingSupportRequestManagerFragments.get(fm);
             if (current == null) {
                 current = new SupportRequestManagerFragment();
                 pendingSupportRequestManagerFragments.put(fm, current);
-                fm.beginTransaction().add(current, TAG).commitAllowingStateLoss();
+                fm.beginTransaction().add(current, FRAGMENT_TAG).commitAllowingStateLoss();
                 handler.obtainMessage(ID_REMOVE_SUPPORT_FRAGMENT_MANAGER, fm).sendToTarget();
             }
         }
+        return current;
+    }
+
+    RequestManager supportFragmentGet(Context context, FragmentManager fm) {
+        SupportRequestManagerFragment current = getSupportRequestManagerFragment(fm);
         RequestManager requestManager = current.getRequestManager();
         if (requestManager == null) {
-            requestManager = new RequestManager(context, current.getLifecycle());
+            requestManager = new RequestManager(context, current.getLifecycle(), current.getRequestManagerTreeNode());
             current.setRequestManager(requestManager);
         }
         return requestManager;
